@@ -28,6 +28,9 @@ namespace RulesMSBuild.Tools.Builder
         public string OutputPath(params string[] subpath) => Path.Combine(subpath.Prepend(Bazel.OutputDir).ToArray());
         private string ExecPath(string subpath) => Path.Combine(Bazel.ExecRoot, subpath);
         public string BinPath(string subpath) => Path.Combine(Bazel.BinDir, subpath);
+        // msbuild auto-imports <project-file>.*.props from the restore dir from Microsoft.Common.Props
+        public string ProjectExtensionPath(string extension) =>
+            Path.Combine(MSBuild.RestoreDir, Path.GetFileName(ProjectFile) + extension);
         
         // This should be Bazel.ExecRoot, as all the sdk tools are in the sandbox with the builder when it is running
         // MSBuild, however, MSBuild appears to not like the sandbox for the locations of the SDK files as it produces
@@ -62,7 +65,10 @@ namespace RulesMSBuild.Tools.Builder
             
             IsTest = command.NamedArgs.TryGetValue("is_test", out _);
 
-            ProjectBazelProps = new Dictionary<string, string>();
+            ProjectBazelProps = new Dictionary<string, string>()
+            {
+                ["Workspace"] = Bazel.Label.Workspace
+            };
             void TrySetProp(string arg, string name)
             {
                 if (command.NamedArgs.TryGetValue(arg, out var value)
@@ -267,6 +273,9 @@ namespace RulesMSBuild.Tools.Builder
                     break;
                 case "pack":
                     Targets = new[] {"Pack"};
+                    GraphBuild = true;
+                    GlobalProperties["NoBuild"] = "true";
+                    UseCaching = false;
                     break;
                 default:
                     throw new ArgumentException($"Unknown action {action}");

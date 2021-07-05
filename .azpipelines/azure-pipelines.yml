@@ -23,6 +23,8 @@ parameters:
         vmImage: ubuntu-latest
       - name: mac
         vmImage: macOS-latest
+  - name: bazel_args
+    default: ''
 
 jobs:
   - ${{ each platform in parameters.platforms }}:
@@ -46,6 +48,8 @@ jobs:
           - script: |
               bash tests/runall.sh
             displayName: 'Build & Test'
+            env:
+              BAZEL_ARGS: ${{parameters.bazel_args}}
 
           - script: |
               bash .ci/tar.sh

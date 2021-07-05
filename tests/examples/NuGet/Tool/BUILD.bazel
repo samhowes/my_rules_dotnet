@@ -1,0 +1,50 @@
+load("@rules_msbuild//dotnet:defs.bzl", "msbuild_binary")
+load("//tests/tools/build_test:build_test.bzl", "build_test")
+load("@io_bazel_rules_go//go:def.bzl", "go_test")
+
+msbuild_binary(
+    name = "Tool",
+    srcs = ["Program.cs"],
+    content = [
+        "foo.txt",
+    ],
+    data = [
+        "foo.txt",
+    ],
+    packable = True,
+    target_framework = "netcoreapp3.1",
+    version = "1.2.3",
+    visibility = ["//visibility:public"],
+    deps = ["//dotnet/tools/Runfiles"],
+)
+
+build_test(
+    name = "Tool_test",
+    expected_files = {},
+    expected_output = "runfile contents: bar\n\n",
+)
+
+build_test(
+    name = "Tool_nuget_test",
+    expected_files = {
+        "": [
+            "Tool.1.2.3.nupkg",
+        ],
+    },
+)
+
+go_test(
+    name = "Tool_run_nuget_test",
+    size = "small",
+    srcs = ["run_tool_nuget_test.go"],
+    data = [
+        ":Tool_nuget",
+        "@dotnet_sdk//:dotnet",
+    ],
+    deps = [
+        "//tests/tools/executable",
+        "//tests/tools/files",
+        "@com_github_stretchr_testify//assert",
+        "@io_bazel_rules_go//go/tools/bazel:go_default_library",
+    ],
+)

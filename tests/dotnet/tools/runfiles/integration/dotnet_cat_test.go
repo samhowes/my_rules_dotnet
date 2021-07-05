@@ -11,7 +11,8 @@ import (
 const expected = "Hello Runfiles!\n"
 
 func TestRunGenrule(t *testing.T) {
-	contentBytes, err := ioutil.ReadFile(files.Path("run_dotnet_cat_result.txt"))
+	p, _ := files.Path("run_dotnet_cat_result.txt")
+	contentBytes, err := ioutil.ReadFile(p)
 	if err != nil {
 		t.Fatalf("failed to read genrule result: %v", err)
 	}
@@ -20,9 +21,10 @@ func TestRunGenrule(t *testing.T) {
 }
 
 func TestRunDataDep(t *testing.T) {
+	p, _ := files.BinPath("DotnetCat")
 	config := lib.TestConfig{
 		ExpectedOutput: expected,
-		Target:         files.BinPath("DotnetCat"),
+		Target:         p,
 	}
 	lib.CheckExecutableOutput(t, &config)
 }

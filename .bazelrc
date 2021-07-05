@@ -9,3 +9,6 @@ build:diag --define=BUILD_DIAG=1
 test:diag --define=BUILD_DIAG=1
 
 try-import %workspace%/.bazelrc.user
+
+test:debug --@io_bazel_rules_go//go/config:debug --test_env=GO_TEST_WRAP_TESTV=1 --test_output=all
+run:debug --@io_bazel_rules_go//go/config:debug --test_env=GO_TEST_WRAP_TESTV=1 --test_output=all

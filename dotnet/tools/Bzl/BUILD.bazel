@@ -1,4 +1,5 @@
 load("@rules_msbuild//dotnet:defs.bzl", "msbuild_binary")
+load("//:version.bzl", "VERSION")
 
 exports_files(["WORKSPACE.tpl"])
 
@@ -14,7 +15,9 @@ msbuild_binary(
         "WORKSPACE.tpl",
         "//extras/ide",
     ],
+    packable = True,
     target_framework = "netcoreapp3.1",
+    version = VERSION,
     visibility = ["//visibility:public"],
     deps = [
         "//dotnet/tools/NuGetParser",

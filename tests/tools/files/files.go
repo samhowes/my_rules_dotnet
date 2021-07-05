@@ -24,7 +24,7 @@ func initInfo() {
 	})
 }
 
-func Path(packageRelative string) string {
+func Path(packageRelative string) (string, error) {
 	initInfo()
 	var rpath string
 	if packageRelative[0] == '@' {
@@ -33,8 +33,8 @@ func Path(packageRelative string) string {
 		rpath = path.Join(Info.pkg, packageRelative)
 	}
 
-	fpath, _ := bazel.Runfile(rpath) // yolo on the err, totally won't regret
-	return fpath
+	fpath, err := bazel.Runfile(rpath) // yolo on the err, totally won't regret
+	return fpath, err
 }
 
 func BinName(maybeExe string) string {
@@ -44,7 +44,7 @@ func BinName(maybeExe string) string {
 	return maybeExe
 }
 
-func BinPath(packageRelativeMaybeExe string) string {
+func BinPath(packageRelativeMaybeExe string) (string, error) {
 	return Path(BinName(packageRelativeMaybeExe))
 }
 

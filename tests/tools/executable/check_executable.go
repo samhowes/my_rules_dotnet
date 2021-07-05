@@ -45,7 +45,7 @@ func SetupFakeRunfiles(t *testing.T, binName string) string {
 	}
 
 	binPath := path.Join(path.Dir(fakeRunfilesDir), files.BinName(binName))
-	srcBin := files.BinPath(binName)
+	srcBin, _ := files.BinPath(binName)
 	t.Logf("srcBin %s\n", srcBin)
 	newPath, err := shutil.Copy(srcBin, binPath, true)
 	if err != nil {
@@ -109,4 +109,19 @@ func CheckExecutableOutput(t *testing.T, config *TestConfig) {
 	}
 
 	t.Logf("Stdout: \n'%s'", actualOut)
+}
+
+func CheckDotnetOutput(t *testing.T, assemblyPath string, expectedOutput string) {
+	dotnetPath, _ := files.BinPath("@dotnet")
+	config := TestConfig{
+		Args:           []string{assemblyPath},
+		ExpectedOutput: expectedOutput,
+		Target:         dotnetPath,
+	}
+	os.Setenv("DOTNET_CLI_HOME", path.Dir(dotnetPath))
+	os.Setenv("DOTNET_SKIP_FIRST_TIME_EXPERIENCE", "1")
+	os.Setenv("DOTNET_MULTILEVEL_LOOKUP", "0")
+	os.Setenv("DOTNET_NOLOGO", "0")
+	t.Logf("dotnet path: %s\n", config.Target)
+	CheckExecutableOutput(t, &config)
 }

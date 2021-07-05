@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>netcoreapp3.1</TargetFramework>
+
+    <PackAsTool>true</PackAsTool>
+    <IsTool>true</IsTool>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Runfiles Include="foo.txt"/>
+
+  </ItemGroup>
+
+  <ItemGroup>
+
+    <None Include="@(Runfiles)">
+      <Pack>true</Pack>
+      <PackagePath>content/%(Extension)</PackagePath>
+    </None>
+  </ItemGroup>
+
+<!--  <Target Name="BazelPack" BeforeTargets="Pack">-->
+
+<!--  </Target>-->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\dotnet\tools\Runfiles\Runfiles.csproj" />
+  </ItemGroup>
+</Project>

@@ -21,7 +21,8 @@ func TestRunGenrule(t *testing.T) {
 		fmt.Println(e)
 	}
 
-	contentBytes, err := ioutil.ReadFile(files.Path("run_greeter.txt"))
+	p, _ := files.Path("run_greeter.txt")
+	contentBytes, err := ioutil.ReadFile(p)
 	if err != nil {
 		t.Fatalf("failed to read genrule result: %v", err)
 	}
@@ -34,10 +35,11 @@ func greeterName() string {
 }
 
 func TestRunDataDep(t *testing.T) {
+	binPath, _ := files.BinPath(GREETER)
 	config := lib.TestConfig{
 		Args:           []string{"data dep"},
 		ExpectedOutput: "Hello: data dep!\n",
-		Target:         files.BinPath(GREETER),
+		Target:         binPath,
 	}
 	lib.CheckExecutableOutput(t, &config)
 }
@@ -57,10 +59,11 @@ func TestRunDirect(t *testing.T) {
 }
 
 func TestBootstrapEnvVars(t *testing.T) {
+	binPath, _ := files.BinPath(GREETER)
 	config := lib.TestConfig{
 		Args:           []string{},
 		ExpectedOutput: "",
-		Target:         files.BinPath(GREETER),
+		Target:         binPath,
 	}
 	lib.CheckExecutableOutput(t, &config)
 	env := make(map[string]string)

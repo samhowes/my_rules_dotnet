@@ -3,8 +3,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Xml;
+using System.Xml.Linq;
 using Microsoft.Build.Construction;
 using Microsoft.Build.Evaluation;
 using Microsoft.Build.Execution;
@@ -24,7 +27,7 @@ namespace RulesMSBuild.Tools.Builder
         private readonly MsBuildCacheManager _cacheManager;
         private readonly BazelMsBuildLogger _msbuildLog;
         private readonly TargetGraph? _targetGraph;
-
+        
         public Builder(BuildContext context)
         {
             _context = context;
@@ -40,8 +43,8 @@ namespace RulesMSBuild.Tools.Builder
 
             var pathTrimmer = new PathReplacer(context.Bazel);
             _msbuildLog = new BazelMsBuildLogger(
-                _context.DiagnosticsEnabled ? LoggerVerbosity.Normal : LoggerVerbosity.Quiet, 
-                (m) => pathTrimmer.ReplacePath(m) 
+                _context.DiagnosticsEnabled ? LoggerVerbosity.Normal : LoggerVerbosity.Quiet,
+                (m) => pathTrimmer.ReplacePath(m)
                 , _targetGraph!);
         }
 
@@ -74,12 +77,12 @@ namespace RulesMSBuild.Tools.Builder
             }
 
             _buildManager.EndBuild();
-            
+
             if (_targetGraph != null)
             {
                 File.WriteAllText(_context.LabelPath(".dot"), _targetGraph.ToDot());
             }
-            
+
             if (result == BuildResultCode.Success)
             {
                 if (_action == "restore")
@@ -125,6 +128,15 @@ namespace RulesMSBuild.Tools.Builder
 
         private BuildResultCode ExecuteBuild(ProjectCollection projectCollection)
         {
+            if (_action == "pack")
+            {
+                var runfilesManifest = new FileInfo(_context.LabelPath(".runfiles_manifest"));
+                if (runfilesManifest.Exists)
+                {
+                    WriteRunfilesProps(File.ReadAllLines(runfilesManifest.FullName));
+                }
+            }
+
             // don't load the project ahead of time, otherwise the evaluation won't be included in the binlog output
             var source = new TaskCompletionSource<BuildResultCode>();
             var flags = BuildRequestDataFlags.ProvideProjectStateAfterBuild;
@@ -200,38 +212,73 @@ namespace RulesMSBuild.Tools.Builder
             return result;
         }
 
-        private bool ValidateTfm(ProjectInstance project)
+        private void WriteRunfilesProps(string[] runfilesEntries)
         {
-            var actualTfm = project.GetProperty("TargetFramework")?.EvaluatedValue ?? "";
+            var items = new List<XElement>(runfilesEntries.Length);
+            var cwd = Directory.GetCurrentDirectory();
+            foreach (var entry in runfilesEntries)
+            {
+                var parts = entry.Split(' ');
+                var manifestPath = parts[0];
+                var filePath = Path.Combine(cwd, parts[1]);
+
+                items.Add(new XElement("None",
+                    new XAttribute("Include", filePath),
+                    new XElement("Pack", "true"),
+                    new XElement("PackagePath", $"content/runfiles/{manifestPath}")));
+            }
+
+            var xml =
+                new XElement("Project",
+                    new XElement("ItemGroup", items));
+
+            var path = _context.ProjectExtensionPath(".runfiles.props");
+            
+            WriteXml(xml, path);
+        }
+
+        private bool ValidateTfm(ProjectInstance? project)
+        {
+            var actualTfm = project?.GetProperty("TargetFramework")?.EvaluatedValue ?? "";
             if (actualTfm != _context.Tfm)
             {
                 Error(
                     $"Bazel expected TargetFramework {_context.Tfm}, but {_context.WorkspacePath(_context.ProjectFile)} is " +
-                    $"configured to use TargetFramework {actualTfm}. Refusing to build as this will " +
+                    $"configured to use TargetFramework '{actualTfm}'. Refusing to build as this will " +
                     $"produce unreachable output. Please reconfigure the project and/or BUILD file.");
                 {
                     return false;
                 }
             }
+
             return true;
         }
 
         private void WriteBazelProps()
         {
-            if (_action != "restore" || !_context.ProjectBazelProps.Any()) return;
+            if (_action != "restore") return;
 
-            var props = string.Join("\n        ",
-                _context.ProjectBazelProps.Select((pair) => $"<{pair.Key}>{pair.Value}</{pair.Key}>"));
-            File.WriteAllText(
-                // msbuild auto-imports <project-file>.*.props from the restore dir
-                Path.Combine(_context.MSBuild.RestoreDir, Path.GetFileName(_context.ProjectFile) + ".bazel.props"),
-                $@"<Project>
-    <PropertyGroup>
-        {props}
-    </PropertyGroup>
-</Project>
-"
-            );
+            var props =
+                _context.ProjectBazelProps.Select((pair) => new XElement(pair.Key, pair.Value));
+
+            var bazelPropsPath = _context.ProjectExtensionPath(".bazel.props");
+            
+            var xml =
+                new XElement("Project",
+                    new XElement("PropertyGroup", props));
+            WriteXml(xml, bazelPropsPath);
+        }
+
+        private void WriteXml(XElement xml, string path)
+        {
+            using var writer = XmlWriter.Create(path, 
+                new XmlWriterSettings()
+                {
+                    OmitXmlDeclaration = true,
+                    Indent = true
+                });
+            xml.Save(writer);
+            writer.Flush();
         }
 
         private ProjectCollection BeginBuild()
@@ -294,7 +341,7 @@ namespace RulesMSBuild.Tools.Builder
 
             return pc;
         }
-        
+
         /// <summary>
         /// Restore writes absolute paths to project.assets.json and to .props and .targets files.
         /// We can't have absolute paths for these, because they will be re-used in future actions in a different
@@ -417,12 +464,14 @@ namespace RulesMSBuild.Tools.Builder
             _targetGraph = targetGraph;
         }
 
-        public override Task BeginBuildAsync(CacheContext context, PluginLoggerBase logger, CancellationToken cancellationToken)
+        public override Task BeginBuildAsync(CacheContext context, PluginLoggerBase logger,
+            CancellationToken cancellationToken)
         {
             return Task.CompletedTask;
         }
 
-        public override Task<CacheResult> GetCacheResultAsync(BuildRequestData buildRequest, PluginLoggerBase logger, CancellationToken cancellationToken)
+        public override Task<CacheResult> GetCacheResultAsync(BuildRequestData buildRequest, PluginLoggerBase logger,
+            CancellationToken cancellationToken)
         {
             if (_targetGraph == null)
                 return Task.FromResult(CacheResult.IndicateNonCacheHit(CacheResultType.CacheMiss));

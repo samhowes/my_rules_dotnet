@@ -150,6 +150,11 @@ namespace RulesMSBuild.Tools.Bazel
             return Create(Environment.GetEnvironmentVariables());
         }
 
+        public static Runfiles CreateNuget()
+        {
+            return Create(Environment.GetEnvironmentVariables(), true);
+        }
+
         /// <summary>
         /// Returns a new <see cref="Runfiles"/> instance.
         /// <para>The returned object is either:</para>
@@ -157,20 +162,42 @@ namespace RulesMSBuild.Tools.Bazel
         /// <item>manifest-based, meaning it looks up runfile paths from a manifest file</item>
         /// <item>directory-based, meaning it looks up runfile paths under a given directory path</item>
         /// </list>
-        ///
+        /// 
         /// <para>If <paramref name="env"/> contains a "RUNFILES_MANIFEST_ONLY" with value "1", this method returns a
         /// manifest based implementation. The manifest's path is defined by the "RUNFILES_MANIFEST_FILE" key's value
         /// in <paramref name="env"/></para>
         /// <para>Otherwise this method returns a directory-based implementation. The directory's path is defined by
         /// the value in <paramref name="env"/> under the "RUNFILES_DIR" key.</para>
-        ///
+        /// 
         /// <para>Performance note: the manifest-based implementation eagerly reads and caches the whole manifest file
         /// on instantiation.</para>
         /// </summary>
         /// <param name="env">A dictionary of environment variables</param>
+        /// <param name="b"></param>
         /// <returns></returns>
-        public static Runfiles Create(IDictionary env)
+        public static Runfiles Create(IDictionary env, bool checkNuGet = false)
         {
+            if (checkNuGet)
+            {
+                var binDir = Path.GetDirectoryName(Assembly.GetEntryAssembly()!.Location)!;
+                var settingsPath = Path.Combine(binDir!, "DotnetToolSettings.xml");
+                if (File.Exists(settingsPath))
+                {
+                    // assume we're in <package_root>/<tfm>/<cpu>/
+                    // our runfiles root is at <package_root>/content/runfiles 
+                    var runfilesRoot = Path.GetFullPath(Path.Combine(binDir, "../../../content/runfiles"));
+                    if (!Directory.Exists(runfilesRoot))
+                        throw new IOException(
+                            $"Found DotnetToolSettings.xml at {settingsPath}, but could not find a recognizable " +
+                            $"runfiles root at {runfilesRoot}.");
+                    env["RUNFILES_MANIFEST_ONLY"] = "0";
+                    // convert slashes just for consistency with bazel
+                    runfilesRoot = runfilesRoot.Replace('\\', '/');
+                    env["RUNFILES_DIR"] = runfilesRoot;
+                    return new DirectoryBased(runfilesRoot);
+                }
+            }
+            
             if (TryCreate(env, out var runfiles)) return runfiles;
 
             throw new IOException(
@@ -179,7 +206,7 @@ namespace RulesMSBuild.Tools.Bazel
                 $"where TEntry is a class defined in an assembly copied to the output directory.");
         }
 
-        private static bool TryCreate(IDictionary env, out Runfiles directoryBased)
+        private static bool TryCreate(IDictionary env, out Runfiles runfiles)
         {
             if (IsManifestOnly(env))
             {
@@ -187,7 +214,7 @@ namespace RulesMSBuild.Tools.Bazel
                 // On every platform, the launcher also sets RUNFILES_MANIFEST_FILE, but on Linux and macOS it's
                 // faster to use RUNFILES_DIR.
                 {
-                    directoryBased = new ManifestBased(GetManifestPath(env));
+                    runfiles = new ManifestBased(GetManifestPath(env));
                     return true;
                 }
             }
@@ -196,13 +223,11 @@ namespace RulesMSBuild.Tools.Bazel
             if (!string.IsNullOrEmpty(value))
             {
                 // bazel, a launcher, or another process has told us where the runfiles are
-                {
-                    directoryBased = new DirectoryBased(value);
-                    return true;
-                }
+                runfiles = new DirectoryBased(value);
+                return true;
             }
 
-            directoryBased = null;
+            runfiles = null;
             return false;
         }
 
