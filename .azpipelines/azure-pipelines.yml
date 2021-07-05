@@ -24,7 +24,7 @@ parameters:
       - name: mac
         vmImage: macOS-latest
   - name: bazel_args
-    default: ''
+    default: ' '
 
 jobs:
   - ${{ each platform in parameters.platforms }}:

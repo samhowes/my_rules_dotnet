@@ -3,6 +3,10 @@
 set -e
 
 bazel_args="${BAZEL_ARGS:-}"
+if [[ "$bazel_args" == " " ]]; then
+  # azure pipelines doesn't like empty strings as parameters
+  bazel_args=""
+fi
 
 export MSYS2_ARG_CONV_EXCL="*"
 
