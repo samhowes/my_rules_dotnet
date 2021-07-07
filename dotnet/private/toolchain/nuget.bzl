@@ -161,7 +161,10 @@ def _generate_nuget_configs(ctx, config):
         config.packages_folder,
         True,
         # todo(#46) allow custom package sources
-        {"nuget.org": "https://api.nuget.org/v3/index.json"},
+        [
+            {"key": "SamHowes", "value": "/Users/samh/dev/msbuild/artifacts/packages/Debug/Shipping"},
+            {"key": "nuget.org", "value": "https://api.nuget.org/v3/index.json", "protocolVersion": "3"},
+        ],
     )
     ctx.template(
         ctx.path(config.fetch_config),
@@ -172,7 +175,7 @@ def _generate_nuget_configs(ctx, config):
     substitutions = prepare_nuget_config(
         config.packages_folder,
         False,  # no fetch allowed at build time
-        {},  # don't even add sources, just in case
+        [],  # don't even add sources, just in case
     )
     ctx.template(
         ctx.path(NUGET_BUILD_CONFIG),

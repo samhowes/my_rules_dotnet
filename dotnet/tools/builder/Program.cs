@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -82,6 +83,15 @@ namespace RulesMSBuild.Tools.Builder
         private static int Build(Command command)
         {
             var context = new BuildContext(command);
+            var dotNetSdkPath = context.SdkRoot + Path.DirectorySeparatorChar;
+            foreach (KeyValuePair<string, string> keyValuePair in new Dictionary<string, string>()
+            {
+                ["MSBUILD_EXE_PATH"] = dotNetSdkPath + "MSBuild.dll",
+                ["MSBuildExtensionsPath"] = dotNetSdkPath,
+                ["MSBuildSDKsPath"] = dotNetSdkPath + "Sdks"
+            })
+                Environment.SetEnvironmentVariable(keyValuePair.Key, keyValuePair.Value);
+            
             MSBuildLocator.RegisterMSBuildPath(context.SdkRoot);
             var builder = new Builder(context);
             return builder.Build();

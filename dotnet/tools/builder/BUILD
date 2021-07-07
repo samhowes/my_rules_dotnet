@@ -28,8 +28,8 @@ msbuild_binary(
     target_framework = "netcoreapp3.1",
     visibility = ["//:__subpackages__"],
     deps = [
-        "@nuget//Microsoft.Build",
         "@nuget//Microsoft.Build.Locator",
         "@nuget//Microsoft.Build.Utilities.Core",
+        "@nuget//SamHowes.Microsoft.Build",
     ],
 )

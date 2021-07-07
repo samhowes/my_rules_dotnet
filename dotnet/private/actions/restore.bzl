@@ -1,5 +1,6 @@
 load(":common.bzl", "get_nuget_files")
 load("//dotnet/private:context.bzl", "make_builder_cmd")
+load("//dotnet/private/actions:common.bzl", "declare_cache")
 load("//dotnet/private:providers.bzl", "DotnetRestoreInfo", "NuGetPackageInfo")
 
 def restore(ctx, dotnet):
@@ -8,7 +9,9 @@ def restore(ctx, dotnet):
     assets_json = ctx.actions.declare_file("restore/project.assets.json")
     restore_dir = ctx.actions.declare_directory("restore")
 
-    outputs = [assets_json, restore_dir]
+    cache = declare_cache(ctx)
+
+    outputs = [assets_json, restore_dir, cache]
 
     args, cmd_outputs = make_builder_cmd(ctx, dotnet, "restore")
     args.add_all([
@@ -42,6 +45,7 @@ def restore(ctx, dotnet):
         dep_files = dep_files,
         restore_dir = restore_dir,
         target_framework = ctx.attr.target_framework,
+        cache = cache,
     ), outputs
 
 def process_deps(dotnet, deps):

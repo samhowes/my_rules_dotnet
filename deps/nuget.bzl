@@ -9,7 +9,7 @@ def nuget_deps():
             "CommandLineParser:2.9.0-preview1": ["netcoreapp3.1"],  # keep
             # test deps
             "FluentAssertions:5.10.3": ["netcoreapp3.1"],
-            "Microsoft.Build:16.9.0": ["netcoreapp3.1"],
+            "SamHowes.Microsoft.Build:16.9.0": ["netcoreapp3.1"],
             "Microsoft.Build.Locator:1.4.1": ["netcoreapp3.1"],
             "Microsoft.Build.Utilities.Core:16.9.0": ["netcoreapp3.1"],
             "Microsoft.NET.Test.Sdk:16.7.1": ["netcoreapp3.1"],

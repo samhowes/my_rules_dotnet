@@ -1,6 +1,6 @@
 load("//dotnet/private:providers.bzl", "DotnetLibraryInfo", "DotnetRestoreInfo")
 load("//dotnet/private:context.bzl", "make_builder_cmd")
-load(":common.bzl", "get_nuget_files", "write_cache_manifest")
+load(":common.bzl", "declare_cache", "get_nuget_files", "write_cache_manifest")
 load("@bazel_skylib//lib:paths.bzl", "paths")
 
 def build_assembly(ctx, dotnet):
@@ -15,7 +15,7 @@ def build_assembly(ctx, dotnet):
     # didn't listen to our paths
     intermediate_assembly = ctx.actions.declare_file(paths.join("obj", dotnet.config.tfm, assembly.basename))
 
-    build_cache = ctx.actions.declare_file(ctx.attr.name + ".cache")
+    build_cache = declare_cache(ctx)
 
     dep_files, input_caches, runfiles = _process_deps(ctx, dotnet, restore)
     cache_manifest = write_cache_manifest(ctx, input_caches)
@@ -59,6 +59,7 @@ def _process_deps(ctx, dotnet, restore_info):
     files = [
         restore_info.project_file,
         restore_info.restore_dir,
+        restore_info.cache,
     ] + (ctx.files.msbuild_directory +
          # include and content because msbuild could copy them to the output directory of any dependent assembly
          ctx.files.srcs +
@@ -88,6 +89,6 @@ def _process_deps(ctx, dotnet, restore_info):
 
     return (
         depset(files, transitive = transitive),
-        depset(transitive = caches),
+        depset([restore_info.cache], transitive = caches),
         depset(ctx.files.data, transitive = runfiles),
     )

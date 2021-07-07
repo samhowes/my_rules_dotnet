@@ -5,7 +5,7 @@
 build --deleted_packages=e2e/hello,e2e/hello/Binary
 query --deleted_packages=e2e/hello,e2e/hello/Binary
 
-build:diag --define=BUILD_DIAG=1
+build:diag --define=BUILD_DIAG=1 -c dbg
 test:diag --define=BUILD_DIAG=1
 
 try-import %workspace%/.bazelrc.user

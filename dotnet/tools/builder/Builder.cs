@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
 using System.Xml.Linq;
+using Microsoft.Build.BackEnd;
 using Microsoft.Build.Construction;
 using Microsoft.Build.Evaluation;
 using Microsoft.Build.Execution;
@@ -24,10 +25,9 @@ namespace RulesMSBuild.Tools.Builder
         private readonly BuildContext _context;
         private readonly string _action;
         private readonly BuildManager _buildManager;
-        private readonly MsBuildCacheManager _cacheManager;
         private readonly BazelMsBuildLogger _msbuildLog;
         private readonly TargetGraph? _targetGraph;
-        
+
         public Builder(BuildContext context)
         {
             _context = context;
@@ -38,8 +38,6 @@ namespace RulesMSBuild.Tools.Builder
             {
                 _targetGraph = new TargetGraph(trimPath, _context.ProjectFile, null);
             }
-
-            _cacheManager = new MsBuildCacheManager(_buildManager, _context.Bazel.ExecRoot, _targetGraph);
 
             var pathTrimmer = new PathReplacer(context.Bazel);
             _msbuildLog = new BazelMsBuildLogger(
@@ -69,63 +67,53 @@ namespace RulesMSBuild.Tools.Builder
             return (int) result;
         }
 
-        private void EndBuild(BuildResultCode result)
+        private ProjectCollection BeginBuild()
         {
-            if (_context.MSBuild.UseCaching && result == BuildResultCode.Success)
+            // GlobalProjectCollection loads EnvironmentVariables on Init. We use ExecRoot in the project files, we 
+            // can't use MSBuildStartupDirectory because NuGet Restore uses a static graph restore which starts up a 
+            // new process in the directory of the project file. We could set ExecRoot in the ProjectCollection Global
+            // properties, but then we'd have to manage its value in the ConfigCache of the build manager later on.
+            // Setting it here allows the project file to read it for paths and we don't have to clear it later.
+            _context.SetEnvironment();
+
+            var loggers = new List<ILogger>() {_msbuildLog};
+            if (_context.DiagnosticsEnabled)
             {
-                _cacheManager.AfterExecuteBuild();
+                var path = _context.OutputPath(_context.Bazel.Label.Name + ".binlog");
+                Debug($"added binlog {path}");
+                var binlog = new BinaryLogger() {Parameters = path};
+                loggers.Add(binlog);
             }
 
-            _buildManager.EndBuild();
-
-            if (_targetGraph != null)
+            var pc = new ProjectCollection(_context.MSBuild.GlobalProperties, loggers,
+                ToolsetDefinitionLocations.Default);
+            
+            var parameters = new BuildParameters(pc)
             {
-                File.WriteAllText(_context.LabelPath(".dot"), _targetGraph.ToDot());
+                EnableNodeReuse = false,
+                DetailedSummary = true,
+                Loggers = pc.Loggers,
+                ResetCaches = false,
+                LogTaskInputs = _msbuildLog.Verbosity == LoggerVerbosity.Diagnostic,
+                ProjectLoadSettings = _context.DiagnosticsEnabled ? ProjectLoadSettings.RecordEvaluatedItemElements 
+                    : ProjectLoadSettings.Default,
+                // cult-copy
+                ToolsetDefinitionLocations =
+                    ToolsetDefinitionLocations.ConfigurationFile |
+                    ToolsetDefinitionLocations.Registry,
+                // ProjectCacheDescriptor = ProjectCacheDescriptor.FromInstance(new MyCache(_targetGraph),
+                //     new[] {new ProjectGraphEntryPoint(_context.ProjectFile)}, null, null)
+            };
+
+            _buildManager.BeginBuild(parameters);
+            if (_msbuildLog.HasError)
+            {
+                Console.WriteLine("Failed to initialize build manager, please file an issue.");
             }
 
-            if (result == BuildResultCode.Success)
-            {
-                if (_action == "restore")
-                {
-                    FixRestoreOutputs();
-                }
-
-                if (_action == "build" && _context.IsTest)
-                {
-                    // todo make this less hacky
-                    var loggerPath = Path.Combine(
-                        Path.GetDirectoryName(_context.NuGetConfig)!,
-                        "packages/junitxml.testlogger/3.0.87/build/_common");
-                    var tfmPath = Path.Combine(_context.MSBuild.OutputPath, _context.Tfm);
-                    foreach (var dll in Directory.EnumerateFiles(loggerPath))
-                    {
-                        var filename = Path.GetFileName(dll);
-                        File.Copy(dll, Path.Combine(tfmPath, filename));
-                    }
-                }
-
-                if (_context.IsExecutable && _action == "build")
-                {
-                    var basename = _context.Bazel.Label.Name;
-                    if (Path.DirectorySeparatorChar == '\\')
-                    {
-                        // there's not a great "IsWindows" method in c#
-                        basename += ".exe";
-                    }
-
-                    File.WriteAllLines(_context.OutputPath(_context.Tfm, "runfiles.info"), new string[]
-                    {
-                        // first line is the expected location of the runfiles directory from the assembly location
-                        $"../{basename}.runfiles",
-                        // second line is the origin workspace (nice to have)
-                        _context.Bazel.Label.Workspace,
-                        // third is the package (nice to have)
-                        _context.Bazel.Label.Package
-                    });
-                }
-            }
+            return pc;
         }
-
+        
         private BuildResultCode ExecuteBuild(ProjectCollection projectCollection)
         {
             if (_action == "pack")
@@ -143,7 +131,7 @@ namespace RulesMSBuild.Tools.Builder
 
             // our restore outputs are relative to the project directory
             Environment.CurrentDirectory = _context.ProjectDirectory;
-            if (_context.MSBuild.GraphBuild)
+            if (false)
             {
                 var graphData = new GraphBuildRequestData(
                     new ProjectGraphEntryPoint(_context.ProjectFile, projectCollection.GlobalProperties),
@@ -161,48 +149,26 @@ namespace RulesMSBuild.Tools.Builder
                     Directory.CreateDirectory(_context.MSBuild.RestoreDir);
                 }
 
-                var remaining = _context.MSBuild.Requests.Length;
-                var results = new BuildResultCode[_context.MSBuild.Requests.Length];
-                for (var i = 0; i < _context.MSBuild.Requests.Length; i++)
-                {
-                    var buildRequest = _context.MSBuild.Requests[i];
-                    // this is a *Build* Request, NOT a *Graph* build request
-                    // build request only builds a single project in isolation, and any cache misses are considered errors.
-                    // loading up the project graph to begin with enables some other optimizations.
-                    var projectGlobalProperties = new Dictionary<string, string>(projectCollection.GlobalProperties);
-                    foreach (var (key, value) in buildRequest.Properties)
-                        projectGlobalProperties[key] = value;
+                var data = new BuildRequestData(
+                    _context.ProjectFile,
+                    projectCollection.GlobalProperties,
+                    null,
+                    _context.MSBuild.Targets,
+                    null,
+                    // Keep the project items that we have discovered for publish so publish doesn't do a re-build.
+                    flags
+                );
 
-                    var data = new BuildRequestData(
-                        _context.ProjectFile,
-                        projectGlobalProperties,
-                        null,
-                        buildRequest.Targets,
-                        null,
-                        // Keep the project items that we have discovered for publish so publish doesn't do a re-build.
-                        flags
-                    );
-                    // var thisSource = new TaskCompletionSource<BuildResultCode>();
-                    var i1 = i;
-                    _buildManager.PendBuildRequest(data)
-                        .ExecuteAsync(submission =>
-                        {
-                            lock (results)
-                            {
-                                results[i1] = submission.BuildResult.OverallResult;
-                                if (!ValidateTfm(submission.BuildResult.ProjectStateAfterBuild))
-                                    results[i1] = BuildResultCode.Failure;
+                _buildManager.PendBuildRequest(data)
+                    .ExecuteAsync(submission =>
+                    {
+                        var result = submission.BuildResult.OverallResult;
+                        if (!ValidateTfm(submission.BuildResult.ProjectStateAfterBuild))
+                            result = BuildResultCode.Failure;
 
-                                remaining--;
-                                if (remaining > 0) return;
-                                var aggregateResult = BuildResultCode.Failure;
-                                if (results.All(s => s == BuildResultCode.Success))
-                                    aggregateResult = BuildResultCode.Success;
+                        source.SetResult(result);
+                    }, new object());
 
-                                source.SetResult(aggregateResult);
-                            }
-                        }, new object());
-                }
             }
 
             WriteBazelProps();
@@ -281,65 +247,61 @@ namespace RulesMSBuild.Tools.Builder
             writer.Flush();
         }
 
-        private ProjectCollection BeginBuild()
+        private void EndBuild(BuildResultCode result)
         {
-            // GlobalProjectCollection loads EnvironmentVariables on Init. We use ExecRoot in the project files, we 
-            // can't use MSBuildStartupDirectory because NuGet Restore uses a static graph restore which starts up a 
-            // new process in the directory of the project file. We could set ExecRoot in the ProjectCollection Global
-            // properties, but then we'd have to manage its value in the ConfigCache of the build manager later on.
-            // Setting it here allows the project file to read it for paths and we don't have to clear it later.
-            _context.SetEnvironment();
-
-            var loggers = new List<ILogger>() {_msbuildLog};
-            if (_context.DiagnosticsEnabled)
+            if (result == BuildResultCode.Success)
             {
-                var path = _context.OutputPath(_context.Bazel.Label.Name + ".binlog");
-                Debug($"added binlog {path}");
-                var binlog = new BinaryLogger() {Parameters = path};
-                loggers.Add(binlog);
+                // _cacheManager.AfterExecuteBuild();
             }
 
-            var pc = new ProjectCollection(_context.MSBuild.GlobalProperties, loggers,
-                ToolsetDefinitionLocations.Default);
-            // pc.ProjectAdded += (sender, args) => { Diagnostics.WaitForDebugger(); };
-            // pc.RegisterLoggers(loggers);
-            // var pc = new ProjectCollection(new Dictionary<string, string>(), loggers, ToolsetDefinitionLocations.Default);
-            // pc.RegisterLogger(_msbuildLog);
-            var parameters = new BuildParameters(pc)
-            {
-                EnableNodeReuse = false,
-                DetailedSummary = true,
-                Loggers = pc.Loggers,
-                ResetCaches = false,
-                LogTaskInputs = _msbuildLog.Verbosity == LoggerVerbosity.Diagnostic,
-                ProjectLoadSettings = ProjectLoadSettings.RecordEvaluatedItemElements,
-                // cult-copy
-                ToolsetDefinitionLocations =
-                    Microsoft.Build.Evaluation.ToolsetDefinitionLocations.ConfigurationFile |
-                    Microsoft.Build.Evaluation.ToolsetDefinitionLocations.Registry,
-                // ProjectCacheDescriptor = ProjectCacheDescriptor.FromInstance(new MyCache(_targetGraph),
-                //     new[] {new ProjectGraphEntryPoint(_context.ProjectFile)}, null, null)
-            };
+            _buildManager.EndBuild();
 
-
-            if (_context.MSBuild.UseCaching)
+            if (_targetGraph != null)
             {
-                parameters.OutputResultsCacheFile = _context.LabelPath(".cache");
-                parameters.InputResultsCacheFiles = GetInputCaches();
-                parameters.IsolateProjects = true;
+                File.WriteAllText(_context.LabelPath(".dot"), _targetGraph.ToDot());
             }
 
-            _buildManager.BeginBuild(parameters);
-            if (_msbuildLog.HasError)
+            if (result == BuildResultCode.Success)
             {
-                Console.WriteLine("Failed to initialize build manager, please file an issue.");
-            }
-            else if (_context.MSBuild.UseCaching && parameters.InputResultsCacheFiles.Any())
-            {
-                _cacheManager.BeforeExecuteBuild();
-            }
+                if (_action == "restore")
+                {
+                    FixRestoreOutputs();
+                }
 
-            return pc;
+                if (_action == "build" && _context.IsTest)
+                {
+                    // todo make this less hacky
+                    var loggerPath = Path.Combine(
+                        Path.GetDirectoryName(_context.NuGetConfig)!,
+                        "packages/junitxml.testlogger/3.0.87/build/_common");
+                    var tfmPath = Path.Combine(_context.MSBuild.OutputPath, _context.Tfm);
+                    foreach (var dll in Directory.EnumerateFiles(loggerPath))
+                    {
+                        var filename = Path.GetFileName(dll);
+                        File.Copy(dll, Path.Combine(tfmPath, filename));
+                    }
+                }
+
+                if (_context.IsExecutable && _action == "build")
+                {
+                    var basename = _context.Bazel.Label.Name;
+                    if (Path.DirectorySeparatorChar == '\\')
+                    {
+                        // there's not a great "IsWindows" method in c#
+                        basename += ".exe";
+                    }
+
+                    File.WriteAllLines(_context.OutputPath(_context.Tfm, "runfiles.info"), new string[]
+                    {
+                        // first line is the expected location of the runfiles directory from the assembly location
+                        $"../{basename}.runfiles",
+                        // second line is the origin workspace (nice to have)
+                        _context.Bazel.Label.Workspace,
+                        // third is the package (nice to have)
+                        _context.Bazel.Label.Package
+                    });
+                }
+            }
         }
 
         /// <summary>
@@ -454,7 +416,7 @@ namespace RulesMSBuild.Tools.Builder
             }
         }
     }
-
+    
     internal class MyCache : ProjectCachePluginBase
     {
         private readonly TargetGraph? _targetGraph;

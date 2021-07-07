@@ -7,6 +7,7 @@ DotnetRestoreInfo = provider(
         "restore_dir": "",
         "target_framework": "",
         "dep_files": "",
+        "cache": "",
     },
 )
 

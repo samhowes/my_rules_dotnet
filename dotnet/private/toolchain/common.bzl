@@ -1,7 +1,7 @@
 # keep in sync with //dotnet/tools/builder/builder.csproj
 BUILDER_PACKAGES = {
     "Microsoft.Build.Locator": "1.4.1",
-    "Microsoft.Build": "16.9.0",
+    "SamHowes.Microsoft.Build": "16.9.0",
     "Microsoft.Build.Utilities.Core": "16.9.0",
 }
 
