@@ -1,13 +1,15 @@
+using System.IO;
 using System.Text.RegularExpressions;
 
 namespace RulesMSBuild.Tools.Builder
 {
-    public class PathReplacer
+    public class PathMapper
     {
         private readonly BazelContext _bazel;
         private readonly Regex _regex;
 
-        public PathReplacer(BazelContext bazel)
+        protected PathMapper(){} // for Moq
+        public PathMapper(BazelContext bazel)
         {
             _bazel = bazel;
 
@@ -17,6 +19,6 @@ namespace RulesMSBuild.Tools.Builder
                 RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
         }
 
-        public string ReplacePath(string path) => _regex.Replace(path, "");
+        public virtual string ReplacePath(string path) => _regex.Replace(path, "");
     }
 }

@@ -27,6 +27,7 @@ namespace RulesMSBuild.Tools.Builder
         private readonly BuildManager _buildManager;
         private readonly BazelMsBuildLogger _msbuildLog;
         private readonly TargetGraph? _targetGraph;
+        private BuildCache? _cache;
 
         public Builder(BuildContext context)
         {
@@ -39,7 +40,7 @@ namespace RulesMSBuild.Tools.Builder
                 _targetGraph = new TargetGraph(trimPath, _context.ProjectFile, null);
             }
 
-            var pathTrimmer = new PathReplacer(context.Bazel);
+            var pathTrimmer = new PathMapper(context.Bazel);
             _msbuildLog = new BazelMsBuildLogger(
                 _context.DiagnosticsEnabled ? LoggerVerbosity.Normal : LoggerVerbosity.Quiet,
                 (m) => pathTrimmer.ReplacePath(m)
@@ -85,6 +86,8 @@ namespace RulesMSBuild.Tools.Builder
                 loggers.Add(binlog);
             }
 
+            InstantiateCache();
+
             var pc = new ProjectCollection(_context.MSBuild.GlobalProperties, loggers,
                 ToolsetDefinitionLocations.Default);
             
@@ -113,7 +116,12 @@ namespace RulesMSBuild.Tools.Builder
 
             return pc;
         }
-        
+
+        private void InstantiateCache()
+        {
+            // _cache = new BuildCache(new CacheManifest());
+        }
+
         private BuildResultCode ExecuteBuild(ProjectCollection projectCollection)
         {
             if (_action == "pack")
@@ -158,7 +166,7 @@ namespace RulesMSBuild.Tools.Builder
                     // Keep the project items that we have discovered for publish so publish doesn't do a re-build.
                     flags
                 );
-
+                
                 _buildManager.PendBuildRequest(data)
                     .ExecuteAsync(submission =>
                     {
@@ -166,6 +174,9 @@ namespace RulesMSBuild.Tools.Builder
                         if (!ValidateTfm(submission.BuildResult.ProjectStateAfterBuild))
                             result = BuildResultCode.Failure;
 
+                        if (result == BuildResultCode.Success)
+                            _cache.RecordResult(submission.BuildResult);
+                        
                         source.SetResult(result);
                     }, new object());
 
